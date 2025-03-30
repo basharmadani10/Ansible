@@ -1,0 +1,135 @@
+---
+- hosts: 127.0.0.1
+  connection: local
+  remote_user: bm10
+  become: true
+  vars:
+    nexus_user: nexus
+    nexus_group: nexus
+    nexus_dirs:
+      - /app/nexus
+      - /app/sonatype-work
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - wget
+          - openjdk-17-jdk
+        state: present
+
+    - name: Create application directory
+      file:
+        path: /app
+        state: directory
+        mode: '0755'
+
+    - name: Create Nexus user
+      user:
+        name: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+        system: yes
+        create_home: no
+        state: present
+
+    - name: Find Nexus archive
+      find:
+        paths: /app
+        patterns: "nexus-unix-*.tar.gz"
+      register: nexus_archive
+
+
+
+    - name: Extract Nexus to /app
+      unarchive:
+        src: "{{ nexus_archive.files[0].path }}"
+        dest: /app/
+        remote_src: yes
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+
+
+
+    - name: Find extracted Nexus directory
+      find:
+        paths: /app
+        patterns: "nexus-*"
+        file_type: directory
+      register: nexus_directory
+
+
+    - name: Set Nexus directory variable
+      set_fact:
+        nexus_path: "{{ nexus_directory.files[0].path }}"
+
+
+
+    - name: Ensure Nexus directories have correct permissions
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+        recurse: yes
+        # this to match /app/nexus/
+        # and nexus_dirs 
+      loop: "{{ nexus_dirs + [nexus_path] }}"
+
+    - name: Configure nexus.rc file
+      block:
+        - name: Ensure nexus.rc exists
+          file:
+            path: "{{ nexus_path }}/bin/nexus.rc"
+            state: touch
+            owner: "{{ nexus_user }}"
+            group: "{{ nexus_group }}"
+            mode: '0644'
+
+        - name: Set run_as_user parameter in nexus.rc
+          lineinfile:
+            path: "{{ nexus_path }}/bin/nexus.rc"
+            regexp: '^#?run_as_user='
+
+            # add this line 
+            line: 'run_as_user="{{ nexus_user }}"'
+            owner: "{{ nexus_user }}"
+            group: "{{ nexus_group }}"
+            mode: '0644'
+            backrefs: yes
+
+    - name: Configure Nexus systemd service
+      block:
+        - name: Create systemd service file
+          copy:
+            dest: /etc/systemd/system/nexus.service
+            content: |
+              [Unit]
+              Description=Nexus service
+              After=network.target
+
+              [Service]
+              Type=forking
+              LimitNOFILE=65536
+              User={{ nexus_user }}
+              Group={{ nexus_group }}
+              ExecStart={{ nexus_path }}/bin/nexus start
+              ExecStop={{ nexus_path }}/bin/nexus stop
+              Restart=on-abort
+              TimeoutStartSec=300
+              Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64"
+
+              [Install]
+              WantedBy=multi-user.target
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Reload systemd daemon
+          systemd:
+            daemon_reload: yes
+
+        - name: Enable and start Nexus service
+          systemd:
+            name: nexus
+            enabled: yes
+            state: started
