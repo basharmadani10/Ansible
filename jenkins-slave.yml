@@ -1,0 +1,31 @@
+---
+- hosts: all
+  remote_user: bm10 
+  become: yes
+  tasks:
+  - name: Ensure jenkins user exists
+    user:
+      name: jenkins
+      group: jenkins
+      home: /home/jenkins
+      shell: /bin/bash
+  - name: update
+    apt: 
+       update_cache: yes
+  - name: create directory 
+    file: 
+       path: /home/jenkins/jenkins_home
+       state: directory
+       mode: '0775'
+  - name: install openjdk 
+    apt: 
+      name: openjdk-17
+
+
+
+      # ansible-playbook -i inventory --private-key  (name of privatekey file)  jenkins-slave.yml
+
+      # create inventory in same directory and puy salvery ip 
+      
+      #  instance  jenkins-slave configuration 
+      # go to ui jenkins(master) --> NEw node --> node-name ---> create ---> remote root directory ---> and  put  /home/jenkins/jenkins_home ,, labels,,, lauch method ----> launch agents via ssh ,,, host--->  slave ip   credinals ----> set username and passweord or privatekey (jenkins user)   ,,, Host key verfication strategy ---> non verifying verfication strategy ---- save 
